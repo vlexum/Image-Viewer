@@ -1,0 +1,253 @@
+<!doctype html>
+<html style="background-color:SlateBlue;">
+  <head>
+    <title>Image Viewer</title>
+  </head>
+  <body>
+    <h1>Hardware Accelerated Image Viewer</h1>
+    <canvas width="600" height="600" id="image_viewer"></canvas>
+    <script>
+      function start(image) {
+        
+        // 1. What are we going to render? (geometry)
+        var vertices = [
+          -0.5,  0.5, 0.0,
+          -0.5, -0.5, 0.0,
+          0.5, -0.5, 0.0 ];
+
+        var indices = [0, 1, 2];
+
+        var texture_coordinates = [
+          0.0, 1.0,
+          0.0, 0.0,
+          1.0, 0.0
+        ];
+
+        // 2. Connect to the canvas
+        var canvas = document.getElementById("image_viewer");
+        var gl = canvas.getContext("webgl");
+
+        // Transformation juice
+        var translation = {x: 0, y: 0};
+        var scale = 1.0;
+        var shear = {x: 0, y: 0};
+        var rotation = 0;
+
+        const INCREMENT = .05;
+
+        const ROTATE_INCREMENT = .15;
+
+        // Look for key presses
+        document.addEventListener("keydown", (event) => {
+            
+          // translate keys
+            if (event.key == 'ArrowUp'){
+              translation.y += INCREMENT;
+            }
+            if (event.key == 'ArrowDown'){
+              translation.y -= INCREMENT;
+            }
+            if (event.key == 'ArrowLeft'){
+              translation.x -= INCREMENT;
+            }
+            if (event.key == 'ArrowRight'){
+              translation.x += INCREMENT;
+            }
+            
+            // Ccaling keys
+            if (event.key == 's'){
+              scale -= INCREMENT;
+            }
+            if (event.key == 'S'){
+              scale += INCREMENT;
+            }
+
+            // Shearing keys
+            if (event.key == 'h'){
+              shear.x -= INCREMENT;
+            }
+            if (event.key == 'H'){
+              shear.x += INCREMENT;
+            }
+            if (event.key == 'j'){
+              shear.y -= INCREMENT;
+            }
+            if (event.key == 'J'){
+              shear.y += INCREMENT;
+            }
+
+            // Rotate keys
+            if (event.key == 'r'){
+              rotation -= ROTATE_INCREMENT;
+            }
+            if (event.key == 'R'){
+              rotation += ROTATE_INCREMENT;
+            }
+
+            // Reset the values
+            if (event.key == 'L'){
+              translation = {x: 0, y: 0};
+              scale = 1.0;
+              shear = {x: 0, y: 0};
+              rotation = 0;
+            }
+            
+            // Redraw the triangle
+            draw();
+        });
+
+        // 2B. Additional setup for texture
+
+        var texture_object = gl.createTexture();
+
+        gl.bindTexture(gl.TEXTURE_2D, texture_object);
+
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1); // hack
+
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
+
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+        // 3. Setup WebGL to render what we want
+
+        // Loading the vertices and connecting to the buffer
+        var vertex_buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertex_buffer);
+        gl.bufferData(gl.ARRAY_BUFFER,
+                      new Float32Array(vertices),
+                      gl.STATIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+        // Loading the indices and connecting to the buffer
+        var index_buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index_buffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,
+                      new Uint16Array(indices),
+                      gl.STATIC_DRAW);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+
+        var texture_coord_buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, texture_coord_buffer);
+        gl.bufferData(gl.ARRAY_BUFFER,
+                      new Float32Array(texture_coordinates),
+                      gl.STATIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+      // 4. Describe our fragment and vertex shaders
+
+        var vertex_source =
+            "precision mediump float;" + // ??
+            "uniform vec4 u_translation;" + 
+            "uniform float u_scale;" +
+            "uniform vec2 u_shear;" +
+            "uniform float u_rotation;" +
+            "attribute vec3 coordinate;" +
+            "attribute vec2 texture_coordinate;" +
+            "varying vec2 tex;" +
+            "void main(void) {" +
+            "  float sin_u = sin(u_rotation);" +
+            "  float cos_u = cos(u_rotation);" +
+            "  mat3 rotationMat = mat3(cos_u, -sin_u, 0, sin_u, cos_u, 0, 0, 0, 1);" +
+            "  mat3 shearMat = mat3(1, u_shear.x, 0, u_shear.y, 1, 0, 0, 0, 1);" +
+            "  vec3 transformation = (rotationMat * shearMat) * (coordinate * u_scale);" +
+            "  gl_Position = vec4(transformation, 1.0) + u_translation;" +
+            "  tex = texture_coordinate;" +
+            "}";
+
+        var fragment_source =
+            "precision mediump float;" + // ??
+            "varying vec2 tex;" +
+            "uniform sampler2D u_sampler;" +
+            "void main(void) {" +
+            "    gl_FragColor = texture2D(u_sampler, tex);" +
+            "}";
+
+        // 5. Compile the shaders and create a GLSL program
+
+        var vertex_shader = gl.createShader(gl.VERTEX_SHADER);
+        gl.shaderSource(vertex_shader, vertex_source);
+        var o = gl.compileShader(vertex_shader);
+        
+
+        var fragment_shader = gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(fragment_shader, fragment_source);
+        gl.compileShader(fragment_shader);
+        
+
+        var shader_program = gl.createProgram();
+        gl.attachShader(shader_program, vertex_shader);
+        gl.attachShader(shader_program, fragment_shader);
+        gl.linkProgram(shader_program);
+        
+        gl.useProgram(shader_program);
+
+        // Associate the shaders to buffer objects
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertex_buffer);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index_buffer);
+
+        var coord = gl.getAttribLocation(shader_program,
+                                         "coordinate");
+        gl.vertexAttribPointer(coord, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(coord);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, texture_coord_buffer);
+        var texture_coordinate = gl.getAttribLocation(shader_program,
+                                                      "texture_coordinate");
+        gl.vertexAttribPointer(texture_coordinate, 2, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(texture_coordinate);
+
+        var u_sampler = gl.getUniformLocation(shader_program, "u_sampler");
+        gl.uniform1i(u_sampler, 0);
+
+        // Get "pointer" to these variable in vertex source
+        var u_translation = gl.getUniformLocation(shader_program, "u_translation");
+        var u_shear = gl.getUniformLocation(shader_program, "u_shear");
+        var u_scale = gl.getUniformLocation(shader_program, "u_scale");
+        var u_rotation = gl.getUniformLocation(shader_program, "u_rotation");
+
+        // 6. Rendering
+        function draw() {
+          // set the variable values (possibly with updated values)
+           gl.uniform4fv(u_translation, [translation.x, translation.y, 0, 0]);
+           gl.uniform1f(u_scale, scale);
+           gl.uniform1f(u_rotation, rotation);
+           gl.uniform2fv(u_shear, [shear.x, shear.y]);
+           
+           // Draw the image
+            gl.clearColor(0.8, 0.8, 0.8, 1.0);
+
+            gl.enable(gl.DEPTH_TEST);
+
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            gl.viewport(0, 0, canvas.width, canvas.height);
+
+            gl.drawElements(gl.TRIANGLES,
+                            indices.length,
+                            gl.UNSIGNED_SHORT,
+                            0);       
+        }
+        // Draw the original triangle so it appears on load
+        draw();    
+      }
+      var image = new Image();
+      image.onload = function() { start(image); };
+      image.src = "sample.png";
+    </script>
+    <h2>
+      Translate	(pan) using	the	arrow	keys<br>
+      Rotate using the r and R key<br>
+      Scale using	the	s	and	S	key<br>
+      Shear X using	the	h	and H	keys<br>
+      Shear Y using	the	j	and J	keys<br>
+      Reset using L	key<br>
+    </h2>
+    <style>
+      h1 {text-align: center;}
+      body {text-align: center;}
+      ul {text-align: center;}
+      h2 {text-align: center;}
+    </style>
+  </body>
+</html>
